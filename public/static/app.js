@@ -464,13 +464,72 @@ class BusinessCardManager {
   }
 
   showError(message) {
-    // 簡単なエラー表示（実際のアプリではより洗練されたUI）
-    alert(`エラー: ${message}`);
+    this.showNotification(message, 'error');
   }
 
   showSuccess(message) {
-    // 簡単な成功表示（実際のアプリではより洗練されたUI）
-    alert(`成功: ${message}`);
+    this.showNotification(message, 'success');
+  }
+
+  showNotification(message, type = 'info') {
+    const container = document.getElementById('notification-container');
+    const notification = document.createElement('div');
+    const id = `notification-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+    
+    notification.id = id;
+    notification.className = `notification ${type} transform translate-x-full opacity-0 transition-all duration-300 ease-in-out`;
+    
+    const bgColor = type === 'success' ? 'bg-green-50 border-green-200' : 
+                   type === 'error' ? 'bg-red-50 border-red-200' : 
+                   'bg-blue-50 border-blue-200';
+    
+    const iconColor = type === 'success' ? 'text-green-600' : 
+                     type === 'error' ? 'text-red-600' : 
+                     'text-blue-600';
+    
+    const icon = type === 'success' ? 'fas fa-check-circle' : 
+                type === 'error' ? 'fas fa-exclamation-circle' : 
+                'fas fa-info-circle';
+    
+    notification.innerHTML = `
+      <div class="max-w-sm w-full ${bgColor} border rounded-lg shadow-lg p-4">
+        <div class="flex items-center">
+          <div class="flex-shrink-0">
+            <i class="${icon} ${iconColor}"></i>
+          </div>
+          <div class="ml-3 flex-1">
+            <p class="text-sm font-medium text-gray-800">${message}</p>
+          </div>
+          <div class="ml-4 flex-shrink-0">
+            <button onclick="businessCardManager.dismissNotification('${id}')" class="text-gray-400 hover:text-gray-600">
+              <i class="fas fa-times"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+    
+    container.appendChild(notification);
+    
+    // アニメーションで表示
+    setTimeout(() => {
+      notification.classList.remove('translate-x-full', 'opacity-0');
+    }, 100);
+    
+    // 自動削除（5秒後）
+    setTimeout(() => {
+      this.dismissNotification(id);
+    }, 5000);
+  }
+
+  dismissNotification(id) {
+    const notification = document.getElementById(id);
+    if (notification) {
+      notification.classList.add('translate-x-full', 'opacity-0');
+      setTimeout(() => {
+        notification.remove();
+      }, 300);
+    }
   }
 
   escapeHtml(text) {
@@ -531,7 +590,17 @@ class BusinessCardManager {
       }
     } catch (error) {
       console.error('Error uploading image:', error);
-      this.showError('画像のアップロード中にエラーが発生しました');
+      if (error.response) {
+        // サーバーからのエラーレスポンス
+        const errorMsg = error.response.data?.error || `サーバーエラー: ${error.response.status}`;
+        this.showError(errorMsg);
+      } else if (error.request) {
+        // ネットワークエラー
+        this.showError('ネットワークエラーが発生しました。接続を確認してください。');
+      } else {
+        // その他のエラー
+        this.showError('画像のアップロード中に予期しないエラーが発生しました');
+      }
     } finally {
       this.showUploadProgress(false);
     }
@@ -557,7 +626,15 @@ class BusinessCardManager {
       
     } catch (error) {
       console.error('Error accessing camera:', error);
-      this.showError('カメラにアクセスできません。カメラの権限を許可してください。');
+      if (error.name === 'NotAllowedError') {
+        this.showError('カメラの使用が許可されていません。ブラウザの設定でカメラアクセスを許可してください。');
+      } else if (error.name === 'NotFoundError') {
+        this.showError('カメラが見つかりません。デバイスにカメラが接続されているか確認してください。');
+      } else if (error.name === 'NotSupportedError') {
+        this.showError('お使いのブラウザではカメラ機能がサポートされていません。');
+      } else {
+        this.showError('カメラにアクセスできませんでした。デバイスとブラウザの設定を確認してください。');
+      }
     }
   }
 

@@ -306,6 +306,9 @@ app.get('/', (c) => {
             </div>
         </div>
 
+        <!-- 通知エリア -->
+        <div id="notification-container" class="fixed top-4 right-4 z-50 space-y-2"></div>
+
         <!-- JavaScript -->
         <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
         <script src="/static/app.js"></script>
