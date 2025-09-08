@@ -10,6 +10,7 @@ class BusinessCardManager {
     this.categories = [];
     this.cameraStream = null;
     this.currentImageFilename = null;
+    this.ocrResults = null;
     this.init();
   }
 
@@ -82,6 +83,23 @@ class BusinessCardManager {
 
     document.getElementById('remove-image-btn').addEventListener('click', () => {
       this.removeImage();
+    });
+
+    // OCR関連イベント
+    document.getElementById('ocr-btn').addEventListener('click', () => {
+      this.performOCR();
+    });
+
+    document.getElementById('auto-fill-btn').addEventListener('click', () => {
+      this.autoFillFromOCR();
+    });
+
+    document.getElementById('parse-text-btn').addEventListener('click', () => {
+      this.parseOCRText();
+    });
+
+    document.getElementById('clear-ocr-btn').addEventListener('click', () => {
+      this.clearOCRResults();
     });
 
     // モーダル外クリックで閉じる
@@ -358,8 +376,10 @@ class BusinessCardManager {
     document.getElementById('card-form').reset();
     this.stopCamera();
     this.hideImageUploadArea();
+    this.clearOCRResults();
     this.currentEditingId = null;
     this.currentImageFilename = null;
+    this.ocrResults = null;
   }
 
   async loadCardForEdit(cardId) {
@@ -708,6 +728,8 @@ class BusinessCardManager {
     document.getElementById('image-upload-area').classList.remove('hidden');
     document.getElementById('camera-container').classList.add('hidden');
     document.getElementById('upload-progress').classList.add('hidden');
+    document.getElementById('ocr-progress').classList.add('hidden');
+    document.getElementById('ocr-results').classList.add('hidden');
   }
 
   showUploadProgress(show) {
@@ -723,6 +745,294 @@ class BusinessCardManager {
   updateUploadProgress(percent) {
     const progressBar = document.getElementById('progress-bar');
     progressBar.style.width = `${percent}%`;
+  }
+
+  // OCR関連メソッド
+  async performOCR() {
+    const img = document.getElementById('current-image');
+    if (!img || !img.src) {
+      this.showError('OCRを実行する画像がありません');
+      return;
+    }
+
+    try {
+      this.showOCRProgress(true, 'テキスト認識を初期化中...');
+
+      const worker = await Tesseract.createWorker('jpn+eng', 1, {
+        logger: (m) => {
+          if (m.status === 'recognizing text') {
+            const progress = Math.round(m.progress * 100);
+            this.updateOCRProgress(progress);
+            document.getElementById('ocr-status').textContent = `テキストを認識中... ${progress}%`;
+          }
+        }
+      });
+
+      document.getElementById('ocr-status').textContent = '画像を処理中...';
+
+      // 画像前処理を適用
+      const processedImageData = await this.preprocessImageForOCR(img);
+      
+      const { data: { text, confidence } } = await worker.recognize(processedImageData);
+      await worker.terminate();
+
+      this.showOCRProgress(false);
+      this.ocrResults = { text, confidence };
+      this.displayOCRResults(text, confidence);
+
+    } catch (error) {
+      console.error('OCR error:', error);
+      this.showOCRProgress(false);
+      this.showError('テキスト認識中にエラーが発生しました');
+    }
+  }
+
+  async preprocessImageForOCR(img) {
+    return new Promise((resolve) => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      
+      canvas.width = img.naturalWidth || img.width;
+      canvas.height = img.naturalHeight || img.height;
+      
+      // 元の画像を描画
+      ctx.drawImage(img, 0, 0);
+      
+      // 画像データを取得
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+      
+      // コントラストと明度を調整（OCR精度向上のため）
+      const contrast = 1.3;
+      const brightness = 15;
+      
+      for (let i = 0; i < data.length; i += 4) {
+        let r = data[i];
+        let g = data[i + 1];
+        let b = data[i + 2];
+        
+        // グレースケール変換
+        const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+        
+        // コントラストと明度調整
+        const adjusted = Math.min(255, Math.max(0, contrast * (gray - 128) + 128 + brightness));
+        
+        data[i] = adjusted;     // R
+        data[i + 1] = adjusted; // G
+        data[i + 2] = adjusted; // B
+      }
+      
+      ctx.putImageData(imageData, 0, 0);
+      resolve(canvas);
+    });
+  }
+
+  displayOCRResults(text, confidence) {
+    const resultsDiv = document.getElementById('ocr-results');
+    const textDiv = document.getElementById('ocr-text');
+    
+    textDiv.textContent = text;
+    resultsDiv.classList.remove('hidden');
+    
+    if (confidence < 60) {
+      this.showNotification('認識精度が低い可能性があります。結果を確認してください。', 'info');
+    } else {
+      this.showSuccess(`テキストを認識しました（精度: ${Math.round(confidence)}%）`);
+    }
+  }
+
+  clearOCRResults() {
+    document.getElementById('ocr-results').classList.add('hidden');
+    document.getElementById('ocr-text').textContent = '';
+    document.getElementById('auto-fill-btn').classList.add('hidden');
+    this.ocrResults = null;
+  }
+
+  showOCRProgress(show, status = 'テキストを認識中...') {
+    const progress = document.getElementById('ocr-progress');
+    if (show) {
+      document.getElementById('ocr-status').textContent = status;
+      progress.classList.remove('hidden');
+    } else {
+      progress.classList.add('hidden');
+      this.updateOCRProgress(0);
+    }
+  }
+
+  updateOCRProgress(percent) {
+    const progressBar = document.getElementById('ocr-progress-bar');
+    progressBar.style.width = `${percent}%`;
+  }
+
+  parseOCRText() {
+    if (!this.ocrResults || !this.ocrResults.text) {
+      this.showError('OCR結果がありません');
+      return;
+    }
+
+    try {
+      const text = this.ocrResults.text;
+      const parsedData = this.extractBusinessCardInfo(text);
+      
+      if (Object.keys(parsedData).length === 0) {
+        this.showError('名刺情報を抽出できませんでした');
+        return;
+      }
+
+      this.fillFormWithParsedData(parsedData);
+      this.showSuccess('名刺情報を自動入力しました。必要に応じて修正してください。');
+      
+    } catch (error) {
+      console.error('Error parsing OCR text:', error);
+      this.showError('テキスト解析中にエラーが発生しました');
+    }
+  }
+
+  extractBusinessCardInfo(text) {
+    const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+    const result = {};
+    
+    // 正規表現パターン
+    const patterns = {
+      email: /[\w\.-]+@[\w\.-]+\.\w+/g,
+      phone: /(?:\+81|0)[0-9\-\(\)\s]{8,}/g,
+      postal: /〒?\s*(\d{3}[-\s]?\d{4})/g,
+      website: /(?:https?:\/\/)?(?:www\.)?[\w\.-]+\.\w+(?:\/[\w\.-]*)*\/?/g,
+    };
+
+    // 各パターンでマッチング
+    for (const [key, pattern] of Object.entries(patterns)) {
+      const matches = text.match(pattern);
+      if (matches) {
+        switch (key) {
+          case 'email':
+            result.email = matches[0];
+            break;
+          case 'phone':
+            result.phone = this.cleanPhoneNumber(matches[0]);
+            break;
+          case 'postal':
+            result.postal_code = matches[0].replace(/〒|\s/g, '');
+            break;
+          case 'website':
+            result.website = matches[0];
+            break;
+        }
+      }
+    }
+
+    // 会社名の推測（株式会社、合同会社、有限会社等を含む行）
+    const companyPatterns = [
+      /.*(?:株式会社|合同会社|有限会社|Corporation|Corp|Company|Co\.|Ltd|Inc|LLC).*/i
+    ];
+    
+    for (const line of lines) {
+      for (const pattern of companyPatterns) {
+        if (pattern.test(line)) {
+          result.company_name = line;
+          break;
+        }
+      }
+      if (result.company_name) break;
+    }
+
+    // 役職の推測
+    const positionPatterns = [
+      /.*(?:代表|社長|部長|課長|主任|係長|取締役|専務|常務|執行役員|マネージャー|リーダー|チーフ|Director|Manager|CEO|CTO|VP).*/i
+    ];
+    
+    for (const line of lines) {
+      for (const pattern of positionPatterns) {
+        if (pattern.test(line)) {
+          result.position = line;
+          break;
+        }
+      }
+      if (result.position) break;
+    }
+
+    // 部署の推測
+    const departmentPatterns = [
+      /.*(?:部|課|室|センター|グループ|チーム|営業|総務|人事|経理|開発|技術|製造|品質|企画|マーケティング|Department|Division).*/i
+    ];
+    
+    for (const line of lines) {
+      for (const pattern of departmentPatterns) {
+        if (pattern.test(line) && !result.position?.includes(line)) {
+          result.department = line;
+          break;
+        }
+      }
+      if (result.department) break;
+    }
+
+    // 人名の推測（カタカナ、ひらがな、漢字の組み合わせ）
+    const namePatterns = [
+      /^[ァ-ヶー\s]+$/,  // カタカナのみ
+      /^[あ-ん\s]+$/,    // ひらがなのみ
+      /^[一-龯\s]{2,8}$/ // 漢字2-8文字
+    ];
+    
+    for (const line of lines) {
+      // 既に特定された情報でない場合のみ
+      if (!result.company_name?.includes(line) && 
+          !result.position?.includes(line) && 
+          !result.department?.includes(line) &&
+          !result.email?.includes(line) &&
+          line.length >= 2 && line.length <= 15) {
+        
+        for (const pattern of namePatterns) {
+          if (pattern.test(line)) {
+            if (line.match(/^[ァ-ヶー\s]+$/)) {
+              result.person_name_kana = line;
+            } else {
+              result.person_name = line;
+            }
+            break;
+          }
+        }
+      }
+    }
+
+    // 住所の推測（都道府県を含む行）
+    const addressPattern = /.*(都|道|府|県).*/;
+    for (const line of lines) {
+      if (addressPattern.test(line) && !result.postal_code?.includes(line)) {
+        result.address = line;
+        break;
+      }
+    }
+
+    return result;
+  }
+
+  cleanPhoneNumber(phone) {
+    // 電話番号の正規化
+    return phone.replace(/[^\d\-]/g, '').replace(/^81/, '0');
+  }
+
+  fillFormWithParsedData(data) {
+    const form = document.getElementById('card-form');
+    
+    for (const [field, value] of Object.entries(data)) {
+      const input = form.querySelector(`[name="${field}"]`);
+      if (input && value && !input.value) { // 既に値がある場合は上書きしない
+        input.value = value;
+        
+        // 視覚的フィードバック
+        input.classList.add('bg-green-50', 'border-green-300');
+        setTimeout(() => {
+          input.classList.remove('bg-green-50', 'border-green-300');
+        }, 2000);
+      }
+    }
+
+    // 抽出された情報をログ出力（デバッグ用）
+    console.log('Extracted business card info:', data);
+  }
+
+  autoFillFromOCR() {
+    this.parseOCRText();
   }
 
   // 画像最適化メソッド

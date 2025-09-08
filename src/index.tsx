@@ -234,6 +234,16 @@ app.get('/', (c) => {
                                             <i class="fas fa-times text-sm"></i>
                                         </button>
                                     </div>
+                                    <div class="mt-4 flex justify-center space-x-3">
+                                        <button type="button" id="ocr-btn" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg transition duration-200 flex items-center">
+                                            <i class="fas fa-eye mr-2"></i>
+                                            テキストを読み取る
+                                        </button>
+                                        <button type="button" id="auto-fill-btn" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition duration-200 flex items-center hidden">
+                                            <i class="fas fa-magic mr-2"></i>
+                                            自動入力
+                                        </button>
+                                    </div>
                                 </div>
 
                                 <!-- 画像アップロードエリア -->
@@ -285,6 +295,37 @@ app.get('/', (c) => {
                                         <div id="progress-bar" class="bg-blue-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
                                     </div>
                                 </div>
+
+                                <!-- OCR進捗 -->
+                                <div id="ocr-progress" class="hidden">
+                                    <div class="flex items-center space-x-3">
+                                        <i class="fas fa-eye fa-pulse text-purple-600"></i>
+                                        <span class="text-sm text-gray-600" id="ocr-status">画像からテキストを読み取り中...</span>
+                                    </div>
+                                    <div class="w-full bg-gray-200 rounded-full h-2 mt-2">
+                                        <div id="ocr-progress-bar" class="bg-purple-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                                    </div>
+                                </div>
+
+                                <!-- OCR結果表示 -->
+                                <div id="ocr-results" class="hidden">
+                                    <div class="bg-purple-50 border border-purple-200 rounded-lg p-4">
+                                        <div class="flex items-center justify-between mb-3">
+                                            <h4 class="text-sm font-medium text-purple-800">読み取り結果</h4>
+                                            <button type="button" id="clear-ocr-btn" class="text-purple-600 hover:text-purple-800 text-xs">
+                                                <i class="fas fa-times mr-1"></i>
+                                                クリア
+                                            </button>
+                                        </div>
+                                        <div id="ocr-text" class="text-sm text-gray-700 whitespace-pre-wrap border-t border-purple-200 pt-3 max-h-32 overflow-y-auto"></div>
+                                        <div class="mt-3 flex justify-end">
+                                            <button type="button" id="parse-text-btn" class="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded text-sm transition duration-200">
+                                                <i class="fas fa-magic mr-1"></i>
+                                                自動解析・入力
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
 
                             <div class="flex justify-end space-x-4 pt-6">
@@ -311,6 +352,7 @@ app.get('/', (c) => {
 
         <!-- JavaScript -->
         <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
         <script src="/static/app.js"></script>
     </body>
     </html>
