@@ -51,3 +51,18 @@ export type Bindings = {
   DB: D1Database;
   R2?: R2Bucket;
 };
+
+export interface ImageUploadResponse {
+  success: boolean;
+  image_url?: string;
+  image_filename?: string;
+  error?: string;
+}
+
+export interface BusinessCardImage {
+  id: string;
+  filename: string;
+  url: string;
+  size: number;
+  uploadedAt: string;
+}

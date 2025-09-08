@@ -15,7 +15,15 @@
       "database_name": "business-card-db",
       "database_id": "local-db"
     }
-  ]
+  ],
+
+  // R2 Storage for business card images (production only)
+  // "r2_buckets": [
+  //   {
+  //     "binding": "R2",
+  //     "bucket_name": "business-card-images"
+  //   }
+  // ]
   // "vars": {
   //   "MY_VAR": "my-variable"
   // },

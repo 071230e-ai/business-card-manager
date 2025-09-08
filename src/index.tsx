@@ -6,6 +6,7 @@ import type { Bindings } from './types'
 // ルートのインポート
 import businessCardsRoutes from './routes/business-cards'
 import categoriesRoutes from './routes/categories'
+import imagesRoutes from './routes/images'
 
 const app = new Hono<{ Bindings: Bindings }>()
 
@@ -18,6 +19,7 @@ app.use('/static/*', serveStatic({ root: './public' }))
 // APIルート
 app.route('/api/business-cards', businessCardsRoutes)
 app.route('/api/categories', categoriesRoutes)
+app.route('/api/images', imagesRoutes)
 
 // ヘルスチェック
 app.get('/api/health', (c) => {
@@ -218,6 +220,71 @@ app.get('/', (c) => {
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">備考</label>
                                 <textarea name="notes" rows="3" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+                            </div>
+
+                            <!-- 名刺画像セクション -->
+                            <div class="space-y-4">
+                                <label class="block text-sm font-medium text-gray-700">名刺画像</label>
+                                
+                                <!-- 既存画像表示 -->
+                                <div id="current-image-container" class="hidden">
+                                    <div class="relative inline-block">
+                                        <img id="current-image" src="" alt="現在の名刺画像" class="max-w-full h-48 object-contain border rounded-lg">
+                                        <button type="button" id="remove-image-btn" class="absolute top-2 right-2 bg-red-600 text-white rounded-full p-1 hover:bg-red-700 transition duration-200">
+                                            <i class="fas fa-times text-sm"></i>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- 画像アップロードエリア -->
+                                <div id="image-upload-area" class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-400 transition duration-200">
+                                    <div class="space-y-4">
+                                        <div class="flex justify-center space-x-4">
+                                            <button type="button" id="file-upload-btn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition duration-200 flex items-center">
+                                                <i class="fas fa-upload mr-2"></i>
+                                                ファイル選択
+                                            </button>
+                                            <button type="button" id="camera-btn" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition duration-200 flex items-center">
+                                                <i class="fas fa-camera mr-2"></i>
+                                                カメラで撮影
+                                            </button>
+                                        </div>
+                                        <p class="text-sm text-gray-500">
+                                            JPEG、PNG、WebP形式（最大5MB）
+                                        </p>
+                                    </div>
+                                    
+                                    <input type="file" id="image-file-input" accept="image/jpeg,image/jpg,image/png,image/webp" class="hidden">
+                                </div>
+
+                                <!-- カメラプレビュー -->
+                                <div id="camera-container" class="hidden space-y-4">
+                                    <div class="relative">
+                                        <video id="camera-video" class="w-full h-64 object-cover bg-black rounded-lg"></video>
+                                        <canvas id="camera-canvas" class="hidden"></canvas>
+                                        <div class="absolute inset-0 border-2 border-white rounded-lg pointer-events-none opacity-50"></div>
+                                    </div>
+                                    <div class="flex justify-center space-x-4">
+                                        <button type="button" id="capture-btn" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg transition duration-200 flex items-center">
+                                            <i class="fas fa-camera mr-2"></i>
+                                            撮影
+                                        </button>
+                                        <button type="button" id="cancel-camera-btn" class="bg-gray-500 hover:bg-gray-600 text-white px-6 py-2 rounded-lg transition duration-200">
+                                            キャンセル
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- アップロード進捗 -->
+                                <div id="upload-progress" class="hidden">
+                                    <div class="flex items-center space-x-3">
+                                        <i class="fas fa-spinner fa-spin text-blue-600"></i>
+                                        <span class="text-sm text-gray-600">画像をアップロード中...</span>
+                                    </div>
+                                    <div class="w-full bg-gray-200 rounded-full h-2 mt-2">
+                                        <div id="progress-bar" class="bg-blue-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                                    </div>
+                                </div>
                             </div>
 
                             <div class="flex justify-end space-x-4 pt-6">

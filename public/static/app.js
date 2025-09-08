@@ -8,6 +8,8 @@ class BusinessCardManager {
     this.currentFilters = {};
     this.currentEditingId = null;
     this.categories = [];
+    this.cameraStream = null;
+    this.currentImageFilename = null;
     this.init();
   }
 
@@ -55,6 +57,31 @@ class BusinessCardManager {
 
     document.getElementById('delete-btn').addEventListener('click', () => {
       this.deleteBusinessCard();
+    });
+
+    // 画像アップロード関連イベント
+    document.getElementById('file-upload-btn').addEventListener('click', () => {
+      document.getElementById('image-file-input').click();
+    });
+
+    document.getElementById('image-file-input').addEventListener('change', (e) => {
+      this.handleFileUpload(e.target.files[0]);
+    });
+
+    document.getElementById('camera-btn').addEventListener('click', () => {
+      this.startCamera();
+    });
+
+    document.getElementById('capture-btn').addEventListener('click', () => {
+      this.captureImage();
+    });
+
+    document.getElementById('cancel-camera-btn').addEventListener('click', () => {
+      this.stopCamera();
+    });
+
+    document.getElementById('remove-image-btn').addEventListener('click', () => {
+      this.removeImage();
     });
 
     // モーダル外クリックで閉じる
@@ -143,6 +170,11 @@ class BusinessCardManager {
     container.innerHTML = cards.map(card => `
       <div class="p-6 hover:bg-gray-50 cursor-pointer transition duration-200" onclick="businessCardManager.viewCard(${card.id})">
         <div class="flex items-start justify-between">
+          ${card.image_url ? `
+            <div class="flex-shrink-0 mr-4">
+              <img src="${card.image_url}" alt="名刺画像" class="w-20 h-12 object-cover rounded border shadow-sm">
+            </div>
+          ` : ''}
           <div class="flex-1">
             <div class="flex items-center mb-2">
               <h3 class="text-lg font-semibold text-gray-800 mr-4">${this.escapeHtml(card.person_name)}</h3>
@@ -324,7 +356,10 @@ class BusinessCardManager {
   closeModal() {
     document.getElementById('card-modal').classList.add('hidden');
     document.getElementById('card-form').reset();
+    this.stopCamera();
+    this.hideImageUploadArea();
     this.currentEditingId = null;
+    this.currentImageFilename = null;
   }
 
   async loadCardForEdit(cardId) {
@@ -341,6 +376,13 @@ class BusinessCardManager {
             input.value = card[key];
           }
         });
+
+        // 既存画像を表示
+        if (card.image_url && card.image_filename) {
+          this.showCurrentImage(card.image_url, card.image_filename);
+        } else {
+          this.hideCurrentImage();
+        }
       }
     } catch (error) {
       console.error('Error loading card for edit:', error);
@@ -435,6 +477,273 @@ class BusinessCardManager {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+  }
+
+  // 画像アップロード関連メソッド
+  async handleFileUpload(file) {
+    if (!file) return;
+
+    // ファイル形式チェック
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      this.showError('対応していないファイル形式です（JPEG、PNG、WebPのみ対応）');
+      return;
+    }
+
+    // ファイルサイズチェック（5MB）
+    if (file.size > 5 * 1024 * 1024) {
+      this.showError('ファイルサイズが大きすぎます（5MB以下にしてください）');
+      return;
+    }
+
+    await this.uploadImage(file);
+  }
+
+  async uploadImage(file) {
+    try {
+      this.showUploadProgress(true);
+      
+      // 画像を最適化
+      const optimizedFile = await this.optimizeImage(file);
+      
+      const formData = new FormData();
+      formData.append('image', optimizedFile);
+      if (this.currentEditingId) {
+        formData.append('businessCardId', this.currentEditingId);
+      }
+
+      const response = await axios.post('/api/images/upload', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+        onUploadProgress: (progressEvent) => {
+          const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+          this.updateUploadProgress(percentCompleted);
+        }
+      });
+
+      if (response.data.success) {
+        this.showCurrentImage(response.data.image_url, response.data.image_filename);
+        this.currentImageFilename = response.data.image_filename;
+        this.showSuccess('画像をアップロードしました');
+      } else {
+        this.showError(response.data.error || 'アップロードに失敗しました');
+      }
+    } catch (error) {
+      console.error('Error uploading image:', error);
+      this.showError('画像のアップロード中にエラーが発生しました');
+    } finally {
+      this.showUploadProgress(false);
+    }
+  }
+
+  async startCamera() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { 
+          facingMode: 'environment', // 背面カメラを優先
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        } 
+      });
+      
+      this.cameraStream = stream;
+      const video = document.getElementById('camera-video');
+      video.srcObject = stream;
+      video.play();
+      
+      document.getElementById('image-upload-area').classList.add('hidden');
+      document.getElementById('camera-container').classList.remove('hidden');
+      
+    } catch (error) {
+      console.error('Error accessing camera:', error);
+      this.showError('カメラにアクセスできません。カメラの権限を許可してください。');
+    }
+  }
+
+  stopCamera() {
+    if (this.cameraStream) {
+      this.cameraStream.getTracks().forEach(track => track.stop());
+      this.cameraStream = null;
+    }
+    
+    document.getElementById('camera-container').classList.add('hidden');
+    document.getElementById('image-upload-area').classList.remove('hidden');
+  }
+
+  captureImage() {
+    const video = document.getElementById('camera-video');
+    const canvas = document.getElementById('camera-canvas');
+    const context = canvas.getContext('2d');
+    
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    context.drawImage(video, 0, 0);
+    
+    canvas.toBlob(async (blob) => {
+      const file = new File([blob], `capture-${Date.now()}.jpg`, { type: 'image/jpeg' });
+      this.stopCamera();
+      
+      // 名刺スキャン用の画像処理を適用
+      const enhancedFile = await this.enhanceBusinessCardImage(file);
+      await this.uploadImage(enhancedFile);
+    }, 'image/jpeg', 0.9);
+  }
+
+  async removeImage() {
+    if (!this.currentImageFilename) return;
+    
+    if (!confirm('画像を削除しますか？')) return;
+
+    try {
+      const response = await axios.delete(`/api/images/${this.currentImageFilename}`);
+      if (response.data.success) {
+        this.hideCurrentImage();
+        this.currentImageFilename = null;
+        this.showSuccess('画像を削除しました');
+      } else {
+        this.showError('画像の削除に失敗しました');
+      }
+    } catch (error) {
+      console.error('Error removing image:', error);
+      this.showError('画像の削除中にエラーが発生しました');
+    }
+  }
+
+  showCurrentImage(imageUrl, filename) {
+    const container = document.getElementById('current-image-container');
+    const img = document.getElementById('current-image');
+    
+    img.src = imageUrl;
+    container.classList.remove('hidden');
+    document.getElementById('image-upload-area').classList.add('hidden');
+    this.currentImageFilename = filename;
+  }
+
+  hideCurrentImage() {
+    document.getElementById('current-image-container').classList.add('hidden');
+    document.getElementById('image-upload-area').classList.remove('hidden');
+    this.currentImageFilename = null;
+  }
+
+  hideImageUploadArea() {
+    document.getElementById('current-image-container').classList.add('hidden');
+    document.getElementById('image-upload-area').classList.remove('hidden');
+    document.getElementById('camera-container').classList.add('hidden');
+    document.getElementById('upload-progress').classList.add('hidden');
+  }
+
+  showUploadProgress(show) {
+    const progress = document.getElementById('upload-progress');
+    if (show) {
+      progress.classList.remove('hidden');
+    } else {
+      progress.classList.add('hidden');
+      this.updateUploadProgress(0);
+    }
+  }
+
+  updateUploadProgress(percent) {
+    const progressBar = document.getElementById('progress-bar');
+    progressBar.style.width = `${percent}%`;
+  }
+
+  // 画像最適化メソッド
+  async optimizeImage(file, maxWidth = 1200, maxHeight = 800, quality = 0.8) {
+    return new Promise((resolve) => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const img = new Image();
+      
+      img.onload = () => {
+        // アスペクト比を維持しながらリサイズ
+        let { width, height } = img;
+        
+        if (width > height) {
+          if (width > maxWidth) {
+            height = (height * maxWidth) / width;
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = (width * maxHeight) / height;
+            height = maxHeight;
+          }
+        }
+        
+        canvas.width = width;
+        canvas.height = height;
+        
+        // 高品質でリサイズ
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, width, height);
+        
+        canvas.toBlob((blob) => {
+          const optimizedFile = new File([blob], file.name, {
+            type: 'image/jpeg',
+            lastModified: Date.now()
+          });
+          resolve(optimizedFile);
+        }, 'image/jpeg', quality);
+      };
+      
+      img.src = URL.createObjectURL(file);
+    });
+  }
+
+  // 名刺スキャン用の画像処理（コントラスト調整）
+  async enhanceBusinessCardImage(file) {
+    return new Promise((resolve) => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const img = new Image();
+      
+      img.onload = () => {
+        canvas.width = img.width;
+        canvas.height = img.height;
+        
+        // 元の画像を描画
+        ctx.drawImage(img, 0, 0);
+        
+        // 画像データを取得して処理
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        
+        // コントラストと明度を調整（名刺の文字を読みやすくする）
+        const contrast = 1.2; // コントラスト調整
+        const brightness = 10; // 明度調整
+        
+        for (let i = 0; i < data.length; i += 4) {
+          // RGB値を取得
+          let r = data[i];
+          let g = data[i + 1];
+          let b = data[i + 2];
+          
+          // コントラストと明度を調整
+          r = Math.min(255, Math.max(0, contrast * (r - 128) + 128 + brightness));
+          g = Math.min(255, Math.max(0, contrast * (g - 128) + 128 + brightness));
+          b = Math.min(255, Math.max(0, contrast * (b - 128) + 128 + brightness));
+          
+          data[i] = r;
+          data[i + 1] = g;
+          data[i + 2] = b;
+        }
+        
+        // 処理した画像データを戻す
+        ctx.putImageData(imageData, 0, 0);
+        
+        canvas.toBlob((blob) => {
+          const enhancedFile = new File([blob], file.name, {
+            type: 'image/jpeg',
+            lastModified: Date.now()
+          });
+          resolve(enhancedFile);
+        }, 'image/jpeg', 0.9);
+      };
+      
+      img.src = URL.createObjectURL(file);
+    });
   }
 }
 
