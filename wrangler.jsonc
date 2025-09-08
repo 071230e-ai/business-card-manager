@@ -8,12 +8,12 @@
     "nodejs_compat"
   ],
   
-  // D1 Database for business card data
+  // D1 Database for business card data (local development)
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "business-card-manager-production",
-      "database_id": ""  // Will be filled after creating the database
+      "database_name": "business-card-db",
+      "database_id": "local-db"
     }
   ]
   // "vars": {

@@ -3,7 +3,7 @@ module.exports = {
     {
       name: 'business-card-manager',
       script: 'npx',
-      args: 'wrangler pages dev dist --d1=business-card-manager-production --local --ip 0.0.0.0 --port 3000',
+      args: 'wrangler pages dev dist --d1=business-card-db --local --ip 0.0.0.0 --port 3000',
       env: {
         NODE_ENV: 'development',
         PORT: 3000
