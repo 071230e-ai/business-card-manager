@@ -1,0 +1,173 @@
+/* 名刺管理システム - カスタムスタイル */
+
+/* 日本語フォント設定 */
+body {
+  font-family: 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Yu Gothic', 'Meiryo', sans-serif;
+}
+
+/* スクロールバーのスタイル */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+/* カード一覧のホバー効果 */
+#cards-container > div:hover {
+  transform: translateX(4px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+/* モーダルのアニメーション */
+#card-modal {
+  animation: fadeIn 0.3s ease-out;
+}
+
+#card-modal > div > div {
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideIn {
+  from { 
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to { 
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* フォーカス状態のスタイル改善 */
+input:focus, textarea:focus, select:focus {
+  ring-width: 2px;
+  ring-color: #3B82F6;
+  border-color: #3B82F6;
+}
+
+/* ボタンのホバー効果 */
+button {
+  transition: all 0.2s ease-in-out;
+}
+
+/* カテゴリタグのスタイル */
+.category-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: white;
+}
+
+/* レスポンシブ対応 */
+@media (max-width: 768px) {
+  .container {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+  
+  #card-modal > div > div {
+    margin: 1rem;
+    max-width: calc(100% - 2rem);
+  }
+  
+  .grid.grid-cols-1.md\\:grid-cols-2 {
+    grid-template-columns: 1fr;
+  }
+  
+  .grid.grid-cols-1.md\\:grid-cols-4 {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 印刷用スタイル */
+@media print {
+  body {
+    -webkit-print-color-adjust: exact;
+    color-adjust: exact;
+  }
+  
+  #add-card-btn,
+  #clear-filters-btn,
+  #pagination,
+  button {
+    display: none !important;
+  }
+  
+  .bg-gray-50 {
+    background-color: white !important;
+  }
+  
+  .shadow {
+    box-shadow: none !important;
+  }
+}
+
+/* ローディングアニメーション */
+.fa-spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* カスタム通知スタイル（将来の拡張用） */
+.notification {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  background: white;
+  border-radius: 0.5rem;
+  padding: 1rem;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  border-left: 4px solid;
+  z-index: 1000;
+  animation: slideInRight 0.3s ease-out;
+}
+
+.notification.success {
+  border-left-color: #10B981;
+}
+
+.notification.error {
+  border-left-color: #EF4444;
+}
+
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* 検索結果のハイライト */
+.search-highlight {
+  background-color: #FEF3C7;
+  font-weight: 500;
+}
