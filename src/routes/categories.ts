@@ -1,137 +1,190 @@
-import { Hono } from 'hono';
-import { cors } from 'hono/cors';
-import type { Bindings, CompanyCategory, ApiResponse } from '../types';
+import { Hono } from 'hono'
+import type { CloudflareBindings, Category, ApiResponse } from '../types'
 
-const app = new Hono<{ Bindings: Bindings }>();
+const categories = new Hono<{ Bindings: CloudflareBindings }>()
 
-// CORS設定
-app.use('*', cors());
-
-// カテゴリ一覧取得
-app.get('/', async (c) => {
+// Get all categories
+categories.get('/', async (c) => {
   try {
-    const { DB } = c.env;
+    const { env } = c
     
-    const { results } = await DB.prepare(`
-      SELECT * FROM company_categories ORDER BY name ASC
-    `).all();
-
-    const response: ApiResponse<CompanyCategory[]> = {
+    const query = `
+      SELECT c.*, COUNT(bc.id) as business_card_count
+      FROM categories c
+      LEFT JOIN business_cards bc ON c.id = bc.category_id
+      GROUP BY c.id, c.name, c.color, c.description, c.created_at, c.updated_at
+      ORDER BY c.name
+    `
+    
+    const result = await env.DB.prepare(query).all()
+    
+    const response: ApiResponse<Category[]> = {
       success: true,
-      data: results
-    };
-
-    return c.json(response);
+      data: result.results as Category[]
+    }
+    
+    return c.json(response)
   } catch (error) {
-    console.error('Error fetching categories:', error);
-    const response: ApiResponse<CompanyCategory[]> = {
-      success: false,
-      error: 'Failed to fetch categories'
-    };
-    return c.json(response, 500);
+    console.error('Error fetching categories:', error)
+    return c.json({ success: false, error: 'Failed to fetch categories' }, 500)
   }
-});
+})
 
-// カテゴリ新規作成
-app.post('/', async (c) => {
+// Get a single category
+categories.get('/:id', async (c) => {
   try {
-    const { DB } = c.env;
-    const categoryData: CompanyCategory = await c.req.json();
+    const { env } = c
+    const id = parseInt(c.req.param('id'))
 
-    if (!categoryData.name) {
-      const response: ApiResponse<CompanyCategory> = {
-        success: false,
-        error: 'Category name is required'
-      };
-      return c.json(response, 400);
+    if (isNaN(id)) {
+      return c.json({ success: false, error: 'Invalid ID' }, 400)
     }
 
-    const result = await DB.prepare(`
-      INSERT INTO company_categories (name, color) VALUES (?, ?)
-    `).bind(categoryData.name, categoryData.color || '#3B82F6').run();
+    const result = await env.DB.prepare('SELECT * FROM categories WHERE id = ?').bind(id).first()
+
+    if (!result) {
+      return c.json({ success: false, error: 'Category not found' }, 404)
+    }
+
+    return c.json({ success: true, data: result })
+  } catch (error) {
+    console.error('Error fetching category:', error)
+    return c.json({ success: false, error: 'Failed to fetch category' }, 500)
+  }
+})
+
+// Create a new category
+categories.post('/', async (c) => {
+  try {
+    const { env } = c
+    const data: Category = await c.req.json()
+
+    // Validate required fields
+    if (!data.name) {
+      return c.json({ success: false, error: 'Name is required' }, 400)
+    }
+
+    // Check if category name already exists
+    const existingCategory = await env.DB.prepare('SELECT id FROM categories WHERE name = ?').bind(data.name).first()
+    
+    if (existingCategory) {
+      return c.json({ success: false, error: 'Category name already exists' }, 400)
+    }
+
+    const query = `
+      INSERT INTO categories (name, color, description, created_at, updated_at) 
+      VALUES (?, ?, ?, datetime('now'), datetime('now'))
+    `
+    
+    const result = await env.DB.prepare(query).bind(
+      data.name,
+      data.color || '#3B82F6',
+      data.description || null
+    ).run()
 
     if (!result.success) {
-      const response: ApiResponse<CompanyCategory> = {
-        success: false,
-        error: 'Failed to create category'
-      };
-      return c.json(response, 500);
+      throw new Error('Failed to insert category')
     }
 
-    const newCategory = await DB.prepare(`
-      SELECT * FROM company_categories WHERE id = ?
-    `).bind(result.meta.last_row_id).first();
-
-    const response: ApiResponse<CompanyCategory> = {
-      success: true,
-      data: newCategory
-    };
-
-    return c.json(response, 201);
+    return c.json({ 
+      success: true, 
+      data: { 
+        id: result.meta.last_row_id, 
+        ...data,
+        color: data.color || '#3B82F6'
+      } 
+    })
   } catch (error) {
-    console.error('Error creating category:', error);
-    const response: ApiResponse<CompanyCategory> = {
-      success: false,
-      error: 'Failed to create category'
-    };
-    return c.json(response, 500);
+    console.error('Error creating category:', error)
+    return c.json({ success: false, error: 'Failed to create category' }, 500)
   }
-});
+})
 
-// 名刺にカテゴリを関連付け
-app.post('/:categoryId/business-cards/:businessCardId', async (c) => {
+// Update a category
+categories.put('/:id', async (c) => {
   try {
-    const { DB } = c.env;
-    const categoryId = c.req.param('categoryId');
-    const businessCardId = c.req.param('businessCardId');
+    const { env } = c
+    const id = parseInt(c.req.param('id'))
+    const data: Category = await c.req.json()
 
-    const result = await DB.prepare(`
-      INSERT OR IGNORE INTO business_card_categories (business_card_id, category_id)
-      VALUES (?, ?)
-    `).bind(businessCardId, categoryId).run();
+    if (isNaN(id)) {
+      return c.json({ success: false, error: 'Invalid ID' }, 400)
+    }
 
-    const response: ApiResponse<null> = {
-      success: true,
-      data: null
-    };
+    // Validate required fields
+    if (!data.name) {
+      return c.json({ success: false, error: 'Name is required' }, 400)
+    }
 
-    return c.json(response);
+    // Check if category name already exists (excluding current category)
+    const existingCategory = await env.DB.prepare('SELECT id FROM categories WHERE name = ? AND id != ?').bind(data.name, id).first()
+    
+    if (existingCategory) {
+      return c.json({ success: false, error: 'Category name already exists' }, 400)
+    }
+
+    const query = `
+      UPDATE categories SET 
+        name = ?, color = ?, description = ?, updated_at = datetime('now')
+      WHERE id = ?
+    `
+    
+    const result = await env.DB.prepare(query).bind(
+      data.name,
+      data.color || '#3B82F6',
+      data.description || null,
+      id
+    ).run()
+
+    if (result.changes === 0) {
+      return c.json({ success: false, error: 'Category not found' }, 404)
+    }
+
+    return c.json({ 
+      success: true, 
+      data: { 
+        id, 
+        ...data,
+        color: data.color || '#3B82F6'
+      } 
+    })
   } catch (error) {
-    console.error('Error linking category to business card:', error);
-    const response: ApiResponse<null> = {
-      success: false,
-      error: 'Failed to link category to business card'
-    };
-    return c.json(response, 500);
+    console.error('Error updating category:', error)
+    return c.json({ success: false, error: 'Failed to update category' }, 500)
   }
-});
+})
 
-// 名刺からカテゴリの関連付けを削除
-app.delete('/:categoryId/business-cards/:businessCardId', async (c) => {
+// Delete a category
+categories.delete('/:id', async (c) => {
   try {
-    const { DB } = c.env;
-    const categoryId = c.req.param('categoryId');
-    const businessCardId = c.req.param('businessCardId');
+    const { env } = c
+    const id = parseInt(c.req.param('id'))
 
-    await DB.prepare(`
-      DELETE FROM business_card_categories 
-      WHERE business_card_id = ? AND category_id = ?
-    `).bind(businessCardId, categoryId).run();
+    if (isNaN(id)) {
+      return c.json({ success: false, error: 'Invalid ID' }, 400)
+    }
 
-    const response: ApiResponse<null> = {
-      success: true,
-      data: null
-    };
+    // Check if category has associated business cards
+    const businessCards = await env.DB.prepare('SELECT COUNT(*) as count FROM business_cards WHERE category_id = ?').bind(id).first()
+    
+    if (businessCards && businessCards.count > 0) {
+      return c.json({ 
+        success: false, 
+        error: `Cannot delete category. ${businessCards.count} business cards are using this category.` 
+      }, 400)
+    }
 
-    return c.json(response);
+    const result = await env.DB.prepare('DELETE FROM categories WHERE id = ?').bind(id).run()
+
+    if (result.changes === 0) {
+      return c.json({ success: false, error: 'Category not found' }, 404)
+    }
+
+    return c.json({ success: true, message: 'Category deleted successfully' })
   } catch (error) {
-    console.error('Error unlinking category from business card:', error);
-    const response: ApiResponse<null> = {
-      success: false,
-      error: 'Failed to unlink category from business card'
-    };
-    return c.json(response, 500);
+    console.error('Error deleting category:', error)
+    return c.json({ success: false, error: 'Failed to delete category' }, 500)
   }
-});
+})
 
-export default app;
+export default categories
