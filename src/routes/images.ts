@@ -15,15 +15,6 @@ const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 app.post('/upload', async (c) => {
   try {
     const { R2, DB } = c.env;
-
-    // R2が利用できない場合のフォールバック
-    if (!R2) {
-      const response: ImageUploadResponse = {
-        success: false,
-        error: 'R2ストレージが設定されていません。本番環境でのみ画像アップロードが利用できます。'
-      };
-      return c.json(response, 501);
-    }
     
     // フォームデータを取得
     const formData = await c.req.formData();
@@ -62,18 +53,31 @@ app.post('/upload', async (c) => {
     const extension = file.name.split('.').pop() || 'jpg';
     const filename = `business-card-${timestamp}-${randomId}.${extension}`;
     
-    // R2にアップロード
     const arrayBuffer = await file.arrayBuffer();
-    await R2.put(filename, arrayBuffer, {
-      httpMetadata: {
-        contentType: file.type,
-      },
-      customMetadata: {
-        originalName: file.name,
-        uploadedAt: new Date().toISOString(),
-        businessCardId: businessCardId || '',
-      },
-    });
+    
+    if (R2) {
+      // 本番環境：R2にアップロード
+      await R2.put(filename, arrayBuffer, {
+        httpMetadata: {
+          contentType: file.type,
+        },
+        customMetadata: {
+          originalName: file.name,
+          uploadedAt: new Date().toISOString(),
+          businessCardId: businessCardId || '',
+        },
+      });
+    } else {
+      // 開発環境：Base64でデータベースに保存
+      const base64Data = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+      const dataUrl = `data:${file.type};base64,${base64Data}`;
+      
+      // 画像データをデータベースに保存
+      await DB.prepare(`
+        INSERT OR REPLACE INTO business_card_images (filename, data_url, content_type, size, created_at)
+        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+      `).bind(filename, dataUrl, file.type, file.size).run();
+    }
 
     // データベースの名刺情報を更新（businessCardIdが提供されている場合）
     if (businessCardId) {
@@ -105,25 +109,42 @@ app.post('/upload', async (c) => {
 // 画像取得
 app.get('/:filename', async (c) => {
   try {
-    const { R2 } = c.env;
+    const { R2, DB } = c.env;
     const filename = c.req.param('filename');
 
-    // R2が利用できない場合（ローカル開発環境）のフォールバック
-    if (!R2) {
-      return c.text('R2ストレージが設定されていません（本番環境でのみ利用可能）', 501);
+    if (R2) {
+      // 本番環境：R2から取得
+      const object = await R2.get(filename);
+      if (!object) {
+        return c.notFound();
+      }
+
+      const headers = new Headers();
+      object.writeHttpMetadata(headers);
+      headers.set('etag', object.httpEtag);
+      headers.set('cache-control', 'public, max-age=31536000'); // 1年キャッシュ
+
+      return new Response(object.body, { headers });
+    } else {
+      // 開発環境：データベースから取得
+      const image = await DB.prepare(`
+        SELECT data_url, content_type FROM business_card_images WHERE filename = ?
+      `).bind(filename).first();
+
+      if (!image) {
+        return c.notFound();
+      }
+
+      // data:image/jpeg;base64,... 形式から実際のデータを抽出
+      const base64Data = image.data_url.split(',')[1];
+      const buffer = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+
+      const headers = new Headers();
+      headers.set('content-type', image.content_type);
+      headers.set('cache-control', 'public, max-age=31536000');
+
+      return new Response(buffer, { headers });
     }
-
-    const object = await R2.get(filename);
-    if (!object) {
-      return c.notFound();
-    }
-
-    const headers = new Headers();
-    object.writeHttpMetadata(headers);
-    headers.set('etag', object.httpEtag);
-    headers.set('cache-control', 'public, max-age=31536000'); // 1年キャッシュ
-
-    return new Response(object.body, { headers });
   } catch (error) {
     console.error('Error retrieving image:', error);
     return c.text('画像の取得に失敗しました', 500);
@@ -136,16 +157,15 @@ app.delete('/:filename', async (c) => {
     const { R2, DB } = c.env;
     const filename = c.req.param('filename');
 
-    if (!R2) {
-      const response: ApiResponse<null> = {
-        success: false,
-        error: 'R2ストレージが設定されていません'
-      };
-      return c.json(response, 501);
+    if (R2) {
+      // 本番環境：R2から削除
+      await R2.delete(filename);
+    } else {
+      // 開発環境：データベースから削除
+      await DB.prepare(`
+        DELETE FROM business_card_images WHERE filename = ?
+      `).bind(filename).run();
     }
-
-    // R2から削除
-    await R2.delete(filename);
 
     // データベースの画像情報をクリア
     await DB.prepare(`
@@ -173,32 +193,46 @@ app.delete('/:filename', async (c) => {
 // 画像リスト取得（管理用）
 app.get('/', async (c) => {
   try {
-    const { R2 } = c.env;
+    const { R2, DB } = c.env;
     
-    if (!R2) {
-      const response: ApiResponse<any[]> = {
+    if (R2) {
+      // 本番環境：R2から取得
+      const list = await R2.list({ limit: 100 });
+      const images = list.objects.map(obj => ({
+        filename: obj.key,
+        size: obj.size,
+        uploaded: obj.uploaded,
+        url: `/api/images/${obj.key}`
+      }));
+
+      const response: ApiResponse<typeof images> = {
         success: true,
-        data: [],
-        total: 0
+        data: images,
+        total: images.length
       };
+
+      return c.json(response);
+    } else {
+      // 開発環境：データベースから取得
+      const { results } = await DB.prepare(`
+        SELECT filename, size, created_at FROM business_card_images ORDER BY created_at DESC LIMIT 100
+      `).all();
+
+      const images = results.map(img => ({
+        filename: img.filename,
+        size: img.size,
+        uploaded: img.created_at,
+        url: `/api/images/${img.filename}`
+      }));
+
+      const response: ApiResponse<typeof images> = {
+        success: true,
+        data: images,
+        total: images.length
+      };
+
       return c.json(response);
     }
-    
-    const list = await R2.list({ limit: 100 });
-    const images = list.objects.map(obj => ({
-      filename: obj.key,
-      size: obj.size,
-      uploaded: obj.uploaded,
-      url: `/api/images/${obj.key}`
-    }));
-
-    const response: ApiResponse<typeof images> = {
-      success: true,
-      data: images,
-      total: images.length
-    };
-
-    return c.json(response);
   } catch (error) {
     console.error('Error listing images:', error);
     const response: ApiResponse<null> = {
